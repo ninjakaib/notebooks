@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "boto3>=1.43.6",
+    "holidays>=0.105",
     "ipykernel>=7.2.0",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.9",
@@ -13,5 +14,8 @@ dependencies = [
     "oracledb>=4.0.0",
     "pandas>=3.0.3",
     "plotly>=6.7.0",
+    "pyyaml>=6.0.3",
+    "scipy>=1.18.1",
+    "sounddevice>=0.5.6",
     "sqlalchemy>=2.0.49",
 ]

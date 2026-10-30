@@ -10,3 +10,10 @@ wheels/
 .venv
 
 ignore/
+# Personal financial data
+payoff_config.yaml
+payoff_schedule.ics
+payoff_schedule.csv
+
+# Mic recordings from speaker-sync
+speaker-sync/recordings/

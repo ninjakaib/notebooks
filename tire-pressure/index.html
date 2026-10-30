@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tire pressure × temperature</title>
+<style>
+  :root {
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --surface-2: #242422;
+    --border: #383835;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8c8b83;
+    --path: #d95926;
+    --accent: #3987e5;
+    --good: #0ca30c;
+    --critical: #d03b3b;
+  }
+  html, body { margin: 0; height: 100%; background: var(--surface-0); color: var(--text-primary);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #app { position: fixed; inset: 0; background: radial-gradient(ellipse at 50% 40%, #1d1d1c 0%, #0c0c0b 75%); }
+  #app canvas { display: block; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+
+  .panel { position: absolute; background: rgba(26, 26, 25, .84); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; box-sizing: border-box; }
+  h1 { font-size: 15px; margin: 0 0 4px; font-weight: 650; letter-spacing: .2px; }
+  .sub { color: var(--text-secondary); margin: 0 0 12px; font-size: 12px; }
+  .muted { color: var(--text-muted); }
+
+  /* HUD */
+  #hud { top: 16px; left: 16px; width: 310px; }
+  .big { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 2px; }
+  .big .val { font-size: 34px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+  .big .lbl { color: var(--text-secondary); font-size: 12px; }
+  .rows { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin-top: 10px;
+    font-variant-numeric: tabular-nums; }
+  .rows dt { color: var(--text-muted); }
+  .rows dd { margin: 0; text-align: right; color: var(--text-primary); }
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-primary); }
+  .status .icon { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 11px; color: #fff; }
+  .status.ok .icon { background: var(--good); }
+  .status.low .icon { background: var(--critical); }
+  .status.low { border-color: var(--critical); }
+  .activity { margin-top: 8px; color: var(--text-secondary); font-size: 12px; }
+  .activity b { color: var(--text-primary); font-weight: 600; }
+
+  /* Controls */
+  #controls { top: 16px; right: 16px; width: 280px; max-height: calc(100% - 120px); overflow-y: auto; }
+  .ctl { margin-bottom: 11px; }
+  .ctl label { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 12px; margin-bottom: 3px; }
+  .ctl label span { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+  button, select { background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--border);
+    border-radius: 7px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  button:hover, select:hover { border-color: #5a5a55; }
+  button.on { border-color: var(--accent); }
+  .section { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-muted); margin: 14px 0 8px; }
+
+  .legend { display: grid; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .legend .item { display: flex; align-items: center; gap: 8px; }
+  .sw-line { width: 22px; height: 3px; border-radius: 2px; }
+  .sw-plane { width: 22px; height: 10px; border-radius: 2px; background: rgba(208, 59, 59, .25); border: 1px solid var(--critical); }
+  .ramp { height: 10px; border-radius: 3px; margin-top: 2px;
+    background: linear-gradient(90deg, #0d366b, #184f95, #256abf, #3987e5, #6da7ec, #9ec5f4, #cde2fb); }
+  .ramp-ticks { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  /* Timeline */
+  #timeline { left: 50%; transform: translateX(-50%); bottom: 16px; width: min(760px, calc(100% - 32px));
+    display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+  #play { width: 38px; height: 32px; font-size: 14px; padding: 0; }
+  #clock { font-variant-numeric: tabular-nums; font-weight: 600; width: 44px; }
+  .scrub { flex: 1; position: relative; }
+  .track { position: relative; height: 8px; margin-bottom: 4px; }
+  .track .seg { position: absolute; top: 2px; height: 4px; border-radius: 2px; background: var(--path); }
+  .track .tick { position: absolute; top: 0; width: 2px; height: 8px; background: #fff; border-radius: 1px; }
+  .hours { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+  /* 3D labels */
+  .tick-l { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .axis-l { font-size: 12px; color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+  .event-l { font-size: 11px; color: var(--text-secondary); background: rgba(17, 17, 16, .78); border: 1px solid var(--border);
+    padding: 2px 7px; border-radius: 999px; white-space: nowrap; transition: color .2s, border-color .2s; }
+  .event-l.active { color: var(--text-primary); border-color: var(--path); }
+  .tpms-l { font-size: 11px; color: var(--text-secondary); white-space: nowrap; display: flex; gap: 5px; align-items: center; }
+  .tpms-l i { font-style: normal; color: var(--critical); font-weight: 700; }
+
+  #tooltip { position: absolute; pointer-events: none; background: rgba(17, 17, 16, .92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 12px; display: none; font-variant-numeric: tabular-nums; z-index: 5; }
+  #tooltip .k { color: var(--text-muted); }
+
+  /* Table + info modals */
+  .modal { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); display: none; place-items: center; z-index: 10; }
+  .modal.show { display: grid; }
+  .modal .panel { position: relative; max-height: 80vh; overflow: auto; width: min(640px, 92vw); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 12px; }
+  th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  th { color: var(--text-muted); font-weight: 600; position: sticky; top: -14px; background: var(--surface-1); }
+  .close { position: absolute; top: 10px; right: 10px; }
+  .eq { font-family: ui-monospace, Menlo, Consolas, monospace; background: var(--surface-2); padding: 8px 10px; border-radius: 6px; margin: 8px 0; color: var(--text-primary); }
+  .modal p { color: var(--text-secondary); }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="app"><div id="labels"></div></div>
+
+<div id="hud" class="panel">
+  <h1>Tire pressure × temperature</h1>
+  <p class="sub">A tire holds a fixed volume of gas, so heating it pushes pressure up along a straight line (an <i>isochore</i>). Each line on the surface is a different amount of air. Adding air moves the tire to a different line.</p>
+  <span id="status" class="status ok"><span class="icon">✓</span><span id="status-text">Pressure OK</span></span>
+  <div class="big"><span class="val" id="p-val">–</span><span class="lbl">gauge pressure</span></div>
+  <div class="activity" id="activity"></div>
+  <dl class="rows">
+    <dt>Ambient air</dt><dd id="r-amb"></dd>
+    <dt>Air inside tire</dt><dd id="r-tire"></dd>
+    <dt>Air charge</dt><dd id="r-air"></dd>
+    <dt>vs. placard</dt><dd id="r-plac"></dd>
+    <dt>Change since midnight</dt><dd id="r-delta"></dd>
+    <dt>Sensitivity right now</dt><dd id="r-sens"></dd>
+  </dl>
+</div>
+
+<div id="controls" class="panel">
+  <div class="section" style="margin-top:0">Scenario</div>
+  <div class="ctl"><label>Air at midnight (cold fill @ 68°F)<span id="v-air0"></span></label><input id="air0" type="range" min="20" max="44" step="0.5" value="30"></div>
+  <div class="ctl"><label>Door-placard pressure<span id="v-placard"></span></label><input id="placard" type="range" min="28" max="44" step="1" value="35"></div>
+  <div class="ctl"><label>Overnight low<span id="v-low"></span></label><input id="low" type="range" min="-20" max="70" step="1" value="15"></div>
+  <div class="ctl"><label>Afternoon high<span id="v-high"></span></label><input id="high" type="range" min="-10" max="100" step="1" value="55"></div>
+  <div class="ctl"><label>Altitude<span id="v-alt"></span></label><input id="altitude" type="range" min="0" max="10000" step="250" value="0"></div>
+  <div class="toggles">
+    <button id="t-rotate" class="on">Auto-rotate</button>
+    <button id="t-proj" class="on">Projections</button>
+    <button id="t-units">°C / kPa</button>
+    <button id="t-table">Table</button>
+    <button id="t-info">How it works</button>
+  </div>
+  <div class="section">Legend</div>
+  <div class="legend">
+    <div>
+      <div class="ramp"></div>
+      <div class="ramp-ticks"><span id="rt0"></span><span id="rt1"></span><span id="rt2"></span></div>
+      <div class="muted" style="font-size:11px">Surface color = gauge pressure</div>
+    </div>
+    <div class="item"><span class="sw-line" style="background:var(--path)"></span>Your tire's path through the day</div>
+    <div class="item"><span class="sw-line" style="background:#fff"></span>Your tire's current isochore</div>
+    <div class="item"><span class="sw-line" style="background:#77766f;height:1px"></span>Other air amounts (every 5 psi)</div>
+    <div class="item"><span class="sw-plane"></span>TPMS warning (25% under placard)</div>
+  </div>
+</div>
+
+<div id="timeline" class="panel">
+  <button id="play" title="Play / pause (space)">❚❚</button>
+  <span id="clock">00:00</span>
+  <div class="scrub">
+    <div class="track" id="track"></div>
+    <input id="scrub" type="range" min="0" max="1440" step="1" value="0">
+    <div class="hours"><span>12a</span><span>3a</span><span>6a</span><span>9a</span><span>12p</span><span>3p</span><span>6p</span><span>9p</span><span>12a</span></div>
+  </div>
+  <select id="speed" title="Playback speed">
+    <option value="0.5">0.5 h/s</option>
+    <option value="1" selected>1 h/s</option>
+    <option value="2">2 h/s</option>
+    <option value="4">4 h/s</option>
+  </select>
+</div>
+
+<div id="tooltip"></div>
+
+<div id="table-modal" class="modal"><div class="panel">
+  <button class="close" data-close>✕</button>
+  <h1>Hourly readings</h1>
+  <p class="sub">Same simulation as the 3D path, sampled on the hour.</p>
+  <table id="table"></table>
+</div></div>
+
+<div id="info-modal" class="modal"><div class="panel">
+  <button class="close" data-close>✕</button>
+  <h1>How it works</h1>
+  <p>The volume of a tire barely changes, so the gas inside obeys Gay-Lussac's law: absolute pressure is proportional to absolute temperature.</p>
+  <div class="eq">P_abs = P_abs,0 × T / T₀   (T in Rankine or Kelvin)</div>
+  <p>Your gauge reads pressure <i>above the atmosphere</i>, so in gauge terms:</p>
+  <div class="eq">P_gauge = (air + 14.7) × (T + 459.67) / 527.67 − P_atm(altitude)</div>
+  <p>Here "air" is the tire's charge, expressed as the gauge reading it would show at 68°F at sea level. Because the slope is (P_gauge + P_atm) / T, the familiar "1 psi per 10°F" rule only holds for a car tire around 35 psi. Higher pressures and colder starting points change faster.</p>
+  <p>The tire temperature in the simulation trails a target temperature: ambient, plus solar heating when parked in the sun, plus friction heat when driving. Heating takes about 10 minutes, cooling about 35. At 12:20 the driver tops the tire off to the placard pressure <i>while it's still warm</i>, a common mistake. Watch the marker jump to a new isochore, then end the night under placard again.</p>
+  <p>Altitude lowers the outside pressure, so the same air charge reads higher on the gauge. The whole surface rises when you move the slider.</p>
+</div></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+
+// ---------- physics ----------
+const P_SEA = 14.696, R_OFF = 459.67, T_REF = 68 + R_OFF;
+const patm = ft => P_SEA * Math.pow(1 - 6.8756e-6 * ft, 5.2559);
+// air = charge expressed as gauge psi at 68°F, sea level
+const gauge = (tF, air, pa) => (air + P_SEA) * (tF + R_OFF) / T_REF - pa;
+const airFor = (pGauge, tF, pa) => (pGauge + pa) * T_REF / (tF + R_OFF) - P_SEA;
+
+const params = { air0: 30, placard: 35, low: 15, high: 55, altitude: 0, metric: false };
+
+// ---------- domain → scene ----------
+const T_DOM = [-20, 140], A_DOM = [20, 45], P_DOM = [0, 60];
+const W = 10, D = 7, H = 6;
+const sx = t => (t - T_DOM[0]) / (T_DOM[1] - T_DOM[0]) * W - W / 2;
+const sz = a => D / 2 - (a - A_DOM[0]) / (A_DOM[1] - A_DOM[0]) * D;
+const sy = p => (p - P_DOM[0]) / (P_DOM[1] - P_DOM[0]) * H;
+const ix = x => (x + W / 2) / W * (T_DOM[1] - T_DOM[0]) + T_DOM[0];
+const iz = z => (D / 2 - z) / D * (A_DOM[1] - A_DOM[0]) + A_DOM[0];
+
+// ---------- units ----------
+const fmtT = (f, d = 0) => params.metric ? `${((f - 32) * 5 / 9).toFixed(d)}°C` : `${f.toFixed(d)}°F`;
+const fmtP = (p, d = 1) => params.metric ? `${(p * 6.89476).toFixed(Math.max(0, d - 1))} kPa` : `${p.toFixed(d)} psi`;
+const fmtPd = (p, d = 1) => (Math.abs(p) < 0.05 ? '±' : p > 0 ? '+' : '−') + fmtP(Math.abs(p), d);
+const tickT = f => params.metric ? `${Math.round((f - 32) * 5 / 9)}°` : `${f}°`;
+const tickP = p => params.metric ? `${Math.round(p * 6.89476)}` : `${p}`;
+
+// ---------- day scenario ----------
+const DRIVES = [
+  { start: 7.5, end: 8.0, heat: 30, label: 'Morning commute: tires heating' },
+  { start: 12.0, end: 12.33, heat: 25, label: 'Driving to the gas station' },
+  { start: 17.5, end: 18.25, heat: 45, label: 'Highway drive home' },
+];
+const TOPOFF = { start: 12.35, end: 12.5 };
+const smooth = f => f * f * (3 - 2 * f);
+
+function ambient(t) {
+  const { low, high } = params;
+  const h = t < 6 ? t + 24 : t;
+  if (h <= 15) return low + (high - low) * (1 - Math.cos(Math.PI * (h - 6) / 9)) / 2;
+  return high - (high - low) * (1 - Math.cos(Math.PI * (h - 15) / 15)) / 2;
+}
+const solar = t => (t > 8 && t < 17) ? 16 * Math.sin(Math.PI * (t - 8) / 9) : 0;
+
+function activity(t) {
+  const d = DRIVES.find(d => t >= d.start && t < d.end);
+  if (d) return d.label;
+  if (t >= TOPOFF.start && t < TOPOFF.end) return 'Topping off to placard, on a warm tire';
+  if (t < 5) return 'Parked overnight';
+  if (t < 7.5) return 'Coldest part of the morning';
+  if (t < 12) return 'Parked in the sun';
+  if (t < 17.5) return 'Parked after topping off';
+  return 'Parked: tires cooling overnight';
+}
+
+let sim = [];
+function simulate() {
+  const pa = patm(params.altitude);
+  const out = [];
+  let T = ambient(0), air = params.air0, preAir = null, goalAir = null;
+  for (let i = 0; i <= 1440; i++) {
+    const t = i / 60;
+    const drive = DRIVES.find(d => t >= d.start && t < d.end);
+    const target = ambient(t) + (drive ? drive.heat : solar(t));
+    if (i > 0) T += (target - T) * (1 - Math.exp(-1 / (drive ? 10 : 35)));
+    if (t >= TOPOFF.start && t <= TOPOFF.end) {
+      if (preAir === null) { preAir = air; goalAir = airFor(params.placard, T, pa); }
+      air = preAir + (goalAir - preAir) * smooth((t - TOPOFF.start) / (TOPOFF.end - TOPOFF.start));
+    }
+    out.push({ t, amb: ambient(t), T, air, P: gauge(T, air, pa), act: activity(t) });
+  }
+  return out;
+}
+
+// ---------- renderer / scene ----------
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+app.prepend(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer({ element: document.getElementById('labels') });
+labelRenderer.setSize(innerWidth, innerHeight);
+
+const scene = new THREE.Scene();
+{
+  const cv = document.createElement('canvas'); cv.width = cv.height = 512;
+  const g = cv.getContext('2d'), grd = g.createRadialGradient(256, 210, 20, 256, 256, 380);
+  grd.addColorStop(0, '#22242a'); grd.addColorStop(1, '#0b0b0b');
+  g.fillStyle = grd; g.fillRect(0, 0, 512, 512);
+  scene.background = new THREE.CanvasTexture(cv); scene.background.colorSpace = THREE.SRGBColorSpace;
+}
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(12.5, 8, 13.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.2, 0);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.5;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 6; controls.maxDistance = 40;
+
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x202020, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(6, 12, 8); scene.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.8); rim.position.set(-8, 4, -10); scene.add(rim);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.45, 1.0);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+const lineMats = [];
+const lineMat = opts => { const m = new LineMaterial({ worldUnits: false, ...opts }); m.resolution.set(innerWidth, innerHeight); lineMats.push(m); return m; };
+
+// ---------- frame: grids, walls, ticks ----------
+const tickLabels = [];
+function label(text, cls, pos, update) {
+  const el = document.createElement('div'); el.className = cls; el.textContent = text;
+  const o = new CSS2DObject(el); o.position.copy(pos); scene.add(o);
+  if (update) tickLabels.push(() => { el.textContent = update(); });
+  return o;
+}
+(function buildFrame() {
+  const grid = [], edge = [];
+  const push = (arr, a, b) => arr.push(a.x, a.y, a.z, b.x, b.y, b.z);
+  const v = (x, y, z) => new THREE.Vector3(x, y, z);
+  for (let t = T_DOM[0]; t <= T_DOM[1]; t += 20) {
+    push(grid, v(sx(t), 0, -D / 2), v(sx(t), 0, D / 2));
+    push(grid, v(sx(t), 0, -D / 2), v(sx(t), H, -D / 2));
+    label(tickT(t), 'tick-l', v(sx(t), -0.05, D / 2 + 0.4), () => tickT(t));
+  }
+  for (let a = A_DOM[0]; a <= A_DOM[1]; a += 5) {
+    push(grid, v(-W / 2, 0, sz(a)), v(W / 2, 0, sz(a)));
+    push(grid, v(-W / 2, 0, sz(a)), v(-W / 2, H, sz(a)));
+    label(tickP(a), 'tick-l', v(W / 2 + 0.4, -0.05, sz(a)), () => tickP(a));
+  }
+  for (let p = P_DOM[0]; p <= P_DOM[1]; p += 10) {
+    push(grid, v(-W / 2, sy(p), -D / 2), v(W / 2, sy(p), -D / 2));
+    push(grid, v(-W / 2, sy(p), -D / 2), v(-W / 2, sy(p), D / 2));
+    label(tickP(p), 'tick-l', v(-W / 2 - 0.4, sy(p), D / 2 + 0.2), () => tickP(p));
+  }
+  [[v(-W/2,0,D/2), v(W/2,0,D/2)], [v(W/2,0,D/2), v(W/2,0,-D/2)], [v(-W/2,0,-D/2), v(W/2,0,-D/2)], [v(-W/2,0,-D/2), v(-W/2,0,D/2)],
+   [v(-W/2,0,-D/2), v(-W/2,H,-D/2)], [v(W/2,0,-D/2), v(W/2,H,-D/2)], [v(-W/2,0,D/2), v(-W/2,H,D/2)],
+   [v(-W/2,H,-D/2), v(W/2,H,-D/2)], [v(-W/2,H,-D/2), v(-W/2,H,D/2)]].forEach(([a, b]) => push(edge, a, b));
+  const mk = (arr, color, opacity) => {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    scene.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity })));
+  };
+  mk(grid, 0x4a4a46, 0.45);
+  mk(edge, 0x6a6a64, 0.8);
+  label('Temperature of the air inside the tire', 'axis-l', v(0, -0.05, D / 2 + 1.0));
+  label('', 'axis-l', v(W / 2 + 1.5, -0.05, 0), () => params.metric ? 'Air charge (kPa @ 20°C)' : 'Air charge (psi @ 68°F)');
+  label('', 'axis-l', v(-W / 2 + 1.5, H + 0.45, D / 2 + 0.2), () => params.metric ? 'Gauge pressure (kPa)' : 'Gauge pressure (psi)');
+  tickLabels.forEach(f => f());
+})();
+
+// ---------- the surface ----------
+const RAMP = ['#0d366b', '#104281', '#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4', '#b7d3f6', '#cde2fb'].map(h => new THREE.Color(h));
+function rampColor(f, out) {
+  f = Math.min(1, Math.max(0, f)) * (RAMP.length - 1);
+  const i = Math.min(RAMP.length - 2, Math.floor(f));
+  return out.lerpColors(RAMP[i], RAMP[i + 1], f - i);
+}
+
+const surfaceGroup = new THREE.Group(); scene.add(surfaceGroup);
+let surface;
+function buildSurface() {
+  surfaceGroup.children.forEach(c => c.geometry.dispose());
+  surfaceGroup.clear();
+  const pa = patm(params.altitude);
+  const NX = 120, NZ = 80, pos = [], col = [], idx = [], c = new THREE.Color();
+  for (let j = 0; j <= NZ; j++) for (let i = 0; i <= NX; i++) {
+    const t = T_DOM[0] + i / NX * (T_DOM[1] - T_DOM[0]);
+    const a = A_DOM[0] + j / NZ * (A_DOM[1] - A_DOM[0]);
+    const p = gauge(t, a, pa);
+    pos.push(sx(t), sy(p), sz(a));
+    rampColor((p - P_DOM[0]) / (P_DOM[1] - P_DOM[0]), c); col.push(c.r, c.g, c.b);
+  }
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const a = j * (NX + 1) + i, b = a + 1, d = a + NX + 1, e = d + 1;
+    idx.push(a, d, b, b, d, e);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  surface = new THREE.Mesh(g, new THREE.MeshPhysicalMaterial({
+    vertexColors: true, roughness: 0.32, metalness: 0.05, clearcoat: 0.7, clearcoatRoughness: 0.25,
+    transparent: true, opacity: 0.92, side: THREE.DoubleSide,
+  }));
+  surfaceGroup.add(surface);
+
+  // isochores (constant air) every 5 psi, faint isotherms every 20°F
+  const iso = [], therm = [], lift = 0.012;
+  for (let a = A_DOM[0]; a <= A_DOM[1] + 1e-6; a += 5)
+    for (let k = 0; k < 60; k++) {
+      const t0 = T_DOM[0] + k / 60 * (T_DOM[1] - T_DOM[0]), t1 = T_DOM[0] + (k + 1) / 60 * (T_DOM[1] - T_DOM[0]);
+      iso.push(sx(t0), sy(gauge(t0, a, pa)) + lift, sz(a), sx(t1), sy(gauge(t1, a, pa)) + lift, sz(a));
+    }
+  for (let t = T_DOM[0]; t <= T_DOM[1]; t += 20) {
+    const a0 = A_DOM[0], a1 = A_DOM[1];
+    therm.push(sx(t), sy(gauge(t, a0, pa)) + lift, sz(a0), sx(t), sy(gauge(t, a1, pa)) + lift, sz(a1));
+  }
+  const ls = (arr, color, opacity) => {
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    surfaceGroup.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false })));
+  };
+  ls(iso, 0xe6e5df, 0.32);
+  ls(therm, 0xe6e5df, 0.12);
+}
+
+// ---------- TPMS plane ----------
+const tpmsMesh = new THREE.Mesh(new THREE.PlaneGeometry(W, D).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xd03b3b, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false }));
+const tpmsEdge = new THREE.LineSegments(new THREE.EdgesGeometry(tpmsMesh.geometry),
+  new THREE.LineBasicMaterial({ color: 0xd03b3b, transparent: true, opacity: 0.7 }));
+scene.add(tpmsMesh, tpmsEdge);
+const tpmsLabelEl = document.createElement('div'); tpmsLabelEl.className = 'tpms-l';
+const tpmsLabel = new CSS2DObject(tpmsLabelEl); scene.add(tpmsLabel);
+const tpmsThreshold = () => params.placard * 0.75;
+function placeTPMS() {
+  const y = sy(tpmsThreshold());
+  tpmsMesh.position.y = tpmsEdge.position.y = y;
+  tpmsLabel.position.set(W / 2 + 0.3, y - 0.3, D / 2 + 0.3);
+  tpmsLabelEl.innerHTML = `<i>⚠</i> TPMS warning below ${fmtP(tpmsThreshold())}`;
+}
+
+// ---------- path, marker, projections ----------
+const PATH_COLOR = new THREE.Color(0xd95926);
+const pathFull = new Line2(new LineGeometry(), lineMat({ color: PATH_COLOR, linewidth: 2, transparent: true, opacity: 0.45 }));
+const pathDone = new Line2(new LineGeometry(), lineMat({ color: PATH_COLOR.clone().multiplyScalar(1.7), linewidth: 3.5 }));
+const isoNow = new Line2(new LineGeometry(), lineMat({ color: 0xf2f1ec, linewidth: 2, transparent: true, opacity: 0.85 }));
+scene.add(pathFull, pathDone, isoNow);
+
+const marker = new THREE.Mesh(new THREE.SphereGeometry(0.09, 32, 16), new THREE.MeshBasicMaterial({ color: new THREE.Color(3, 1.6, 0.85) }));
+const markerLight = new THREE.PointLight(0xff8a50, 4, 3.5, 1.2);
+marker.add(markerLight);
+scene.add(marker);
+
+const dropGeo = new THREE.BufferGeometry(); dropGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Array(18).fill(0), 3));
+const drops = new THREE.LineSegments(dropGeo, new THREE.LineBasicMaterial({ color: 0xd95926, transparent: true, opacity: 0.45 }));
+scene.add(drops);
+const shadowDots = [0, 1, 2].map(() => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.05, 16, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.75, 0.4) }));
+  scene.add(m); return m;
+});
+
+const projGroup = new THREE.Group(); scene.add(projGroup);
+const projections = ['floor', 'back', 'left'].map(() => {
+  const full = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xd95926, transparent: true, opacity: 0.16 }));
+  const done = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xd95926, transparent: true, opacity: 0.7 }));
+  projGroup.add(full, done); return { full, done };
+});
+const project = [
+  (x, y, z) => [x, 0.004, z],
+  (x, y, z) => [x, y, -D / 2 + 0.004],
+  (x, y, z) => [-W / 2 + 0.004, y, z],
+];
+
+const eventLabels = [];
+function buildPath() {
+  const pts = [];
+  sim.forEach(s => pts.push(sx(s.T), sy(s.P) + 0.02, sz(s.air)));
+  pathFull.geometry.dispose(); pathFull.geometry = new LineGeometry().setPositions(pts);
+  pathDone.geometry.dispose(); pathDone.geometry = new LineGeometry().setPositions(pts);
+  pathDone.geometry.instanceCount = 0;
+  projections.forEach((pr, k) => {
+    const arr = [];
+    for (let i = 0; i < pts.length; i += 3) arr.push(...project[k](pts[i], pts[i + 1], pts[i + 2]));
+    [pr.full, pr.done].forEach(l => { l.geometry.dispose(); l.geometry = new THREE.BufferGeometry(); l.geometry.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3)); });
+  });
+
+  eventLabels.forEach(e => scene.remove(e.obj)); eventLabels.length = 0;
+  const range = (a, b) => sim.slice(Math.round(a * 60), Math.round(b * 60) + 1);
+  const argBy = (arr, f) => arr.reduce((best, s) => f(s) > f(best) ? s : best);
+  const events = [
+    { s: argBy(range(0, 7.5), s => -s.P), text: s => `Coldest · ${fmtP(s.P)}`, from: 5, to: 7.5, dy: 0.35 },
+    { s: argBy(range(7.5, 8.2), s => s.P), text: () => 'Commute', from: 7.5, to: 8, dy: 0.8 },
+    { s: sim[Math.round(TOPOFF.end * 60)], text: () => 'Top-off (warm tire)', from: TOPOFF.start, to: TOPOFF.end + 0.1, dy: 1.25 },
+    { s: argBy(range(17.5, 18.5), s => s.P), text: s => `Highway · ${fmtP(s.P)}`, from: 17.5, to: 18.25, dy: 0.45 },
+    { s: sim[1440], text: s => `Midnight · ${fmtP(s.P)}`, from: 23.5, to: 24.01, dy: 0.75 },
+  ];
+  events.forEach(e => {
+    const el = document.createElement('div'); el.className = 'event-l'; el.textContent = e.text(e.s);
+    const obj = new CSS2DObject(el); obj.position.set(sx(e.s.T), sy(e.s.P) + e.dy, sz(e.s.air)); scene.add(obj);
+    eventLabels.push({ obj, el, ...e });
+  });
+}
+
+function setIsoNow(air) {
+  const pa = patm(params.altitude), pts = [];
+  for (let k = 0; k <= 60; k++) {
+    const t = T_DOM[0] + k / 60 * (T_DOM[1] - T_DOM[0]);
+    pts.push(sx(t), sy(gauge(t, air, pa)) + 0.016, sz(air));
+  }
+  isoNow.geometry.dispose(); isoNow.geometry = new LineGeometry().setPositions(pts);
+}
+
+// ---------- timeline track ----------
+const track = document.getElementById('track');
+DRIVES.forEach(d => { const s = document.createElement('div'); s.className = 'seg';
+  s.style.left = `${d.start / 24 * 100}%`; s.style.width = `${(d.end - d.start) / 24 * 100}%`; track.appendChild(s); });
+{ const t = document.createElement('div'); t.className = 'tick'; t.style.left = `${TOPOFF.start / 24 * 100}%`; t.title = 'Top-off'; track.appendChild(t); }
+
+// ---------- HUD ----------
+const $ = id => document.getElementById(id);
+let lastIdx = -1, lastIsoAir = null;
+function showIndex(i) {
+  const s = sim[i];
+  const x = sx(s.T), y = sy(s.P) + 0.02, z = sz(s.air);
+  marker.position.set(x, y, z);
+  pathDone.geometry.instanceCount = i;
+  projections.forEach(pr => pr.done.geometry.setDrawRange(0, i + 1));
+  const f = project[0](x, y, z), b = project[1](x, y, z), l = project[2](x, y, z);
+  dropGeo.attributes.position.array.set([x, y, z, ...f, x, y, z, ...b, x, y, z, ...l]);
+  dropGeo.attributes.position.needsUpdate = true;
+  [f, b, l].forEach((p, k) => shadowDots[k].position.set(...p));
+  if (lastIsoAir === null || Math.abs(s.air - lastIsoAir) > 0.005) { setIsoNow(s.air); lastIsoAir = s.air; }
+
+  if (i === lastIdx) return;
+  lastIdx = i;
+  const hh = Math.floor(s.t) % 24, mm = Math.round((s.t - Math.floor(s.t)) * 60);
+  $('clock').textContent = `${String(i === 1440 ? 24 : hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  $('p-val').textContent = fmtP(s.P);
+  $('activity').innerHTML = `<b>${s.act}</b>`;
+  $('r-amb').textContent = fmtT(s.amb);
+  $('r-tire').textContent = fmtT(s.T);
+  $('r-air').textContent = fmtP(s.air);
+  $('r-plac').textContent = fmtPd(s.P - params.placard);
+  $('r-delta').textContent = fmtPd(s.P - sim[0].P);
+  const perF = (s.P + patm(params.altitude)) / (s.T + R_OFF);
+  $('r-sens').textContent = params.metric ? `${(perF * 6.89476 * 9 / 5 * 5).toFixed(1)} kPa / 5°C` : `${(perF * 10).toFixed(2)} psi / 10°F`;
+  const low = s.P < tpmsThreshold();
+  $('status').className = 'status ' + (low ? 'low' : 'ok');
+  $('status').querySelector('.icon').textContent = low ? '!' : '✓';
+  $('status-text').textContent = low ? 'TPMS warning: low pressure' : 'Pressure OK';
+  eventLabels.forEach(e => e.el.classList.toggle('active', s.t >= e.from && s.t < e.to));
+  if (!scrubbing) $('scrub').value = i;
+}
+
+function buildTable() {
+  const head = `<tr><th>Time</th><th>Activity</th><th>Ambient</th><th>Tire air</th><th>Air charge</th><th>Gauge</th></tr>`;
+  const rows = [];
+  for (let h = 0; h <= 24; h++) {
+    const s = sim[h * 60];
+    rows.push(`<tr><td>${String(h).padStart(2, '0')}:00</td><td>${s.act}</td><td>${fmtT(s.amb)}</td><td>${fmtT(s.T)}</td><td>${fmtP(s.air)}</td><td>${fmtP(s.P)}</td></tr>`);
+  }
+  $('table').innerHTML = head + rows.join('');
+}
+
+// ---------- controls ----------
+let simT = 0, playing = true, scrubbing = false;
+function syncControlLabels() {
+  $('v-air0').textContent = fmtP(params.air0);
+  $('v-placard').textContent = fmtP(params.placard, 0);
+  $('v-low').textContent = fmtT(params.low);
+  $('v-high').textContent = fmtT(params.high);
+  $('v-alt').textContent = params.metric ? `${Math.round(params.altitude * 0.3048).toLocaleString()} m` : `${params.altitude.toLocaleString()} ft`;
+  $('rt0').textContent = fmtP(P_DOM[0], 0); $('rt1').textContent = fmtP((P_DOM[0] + P_DOM[1]) / 2, 0); $('rt2').textContent = fmtP(P_DOM[1], 0);
+}
+function rebuild({ surfaceToo = false } = {}) {
+  if (params.high < params.low) { params.high = params.low; $('high').value = params.low; }
+  if (surfaceToo) buildSurface();
+  sim = simulate();
+  buildPath(); placeTPMS(); buildTable(); syncControlLabels();
+  lastIdx = -1; lastIsoAir = null;
+  showIndex(Math.round(simT * 60));
+}
+['air0', 'placard', 'low', 'high'].forEach(id => $(id).addEventListener('input', e => { params[id] = +e.target.value; rebuild(); }));
+$('altitude').addEventListener('input', e => { params.altitude = +e.target.value; rebuild({ surfaceToo: true }); });
+
+const togglePlay = () => { playing = !playing; $('play').textContent = playing ? '❚❚' : '▶'; };
+$('play').addEventListener('click', togglePlay);
+addEventListener('keydown', e => { if (e.code === 'Space' && e.target.tagName !== 'INPUT') { e.preventDefault(); togglePlay(); } });
+$('scrub').addEventListener('pointerdown', () => scrubbing = true);
+addEventListener('pointerup', () => scrubbing = false);
+$('scrub').addEventListener('input', e => { simT = +e.target.value / 60; showIndex(+e.target.value); });
+$('t-rotate').addEventListener('click', e => { controls.autoRotate = !controls.autoRotate; e.target.classList.toggle('on', controls.autoRotate); });
+$('t-proj').addEventListener('click', e => { const on = !projGroup.visible; projGroup.visible = drops.visible = on; shadowDots.forEach(d => d.visible = on); e.target.classList.toggle('on', on); });
+$('t-units').addEventListener('click', e => { params.metric = !params.metric; e.target.classList.toggle('on', params.metric); tickLabels.forEach(f => f()); rebuild(); });
+$('t-table').addEventListener('click', () => $('table-modal').classList.add('show'));
+$('t-info').addEventListener('click', () => $('info-modal').classList.add('show'));
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m || e.target.hasAttribute('data-close')) m.classList.remove('show'); }));
+
+// ---------- hover ----------
+const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let mouseMoved = false, mouseClient = { x: 0, y: 0 };
+const hoverDot = new THREE.Mesh(new THREE.RingGeometry(0.07, 0.11, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthTest: false }));
+hoverDot.visible = false; scene.add(hoverDot);
+renderer.domElement.addEventListener('pointermove', e => {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
+  mouseClient = { x: e.clientX, y: e.clientY }; mouseMoved = true;
+});
+renderer.domElement.addEventListener('pointerleave', () => { $('tooltip').style.display = 'none'; hoverDot.visible = false; });
+function updateHover() {
+  if (!mouseMoved) return; mouseMoved = false;
+  raycaster.setFromCamera(mouse, camera);
+  const hit = raycaster.intersectObject(surface)[0];
+  const tip = $('tooltip');
+  if (!hit) { tip.style.display = 'none'; hoverDot.visible = false; return; }
+  const t = ix(hit.point.x), a = iz(hit.point.z), p = gauge(t, a, patm(params.altitude));
+  hoverDot.visible = true; hoverDot.position.copy(hit.point);
+  hoverDot.lookAt(hit.point.clone().add(hit.face.normal));
+  tip.innerHTML = `<div><span class="k">Temperature</span> ${fmtT(t)}</div><div><span class="k">Air charge</span> ${fmtP(a)}</div><div><b>${fmtP(p)}</b> <span class="k">gauge</span></div>`;
+  tip.style.display = 'block';
+  tip.style.left = `${mouseClient.x + 14}px`; tip.style.top = `${mouseClient.y + 14}px`;
+}
+
+// ---------- resize + loop ----------
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+  labelRenderer.setSize(innerWidth, innerHeight);
+  lineMats.forEach(m => m.resolution.set(innerWidth, innerHeight));
+});
+
+buildSurface();
+rebuild();
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (playing && !scrubbing) {
+    simT += dt * +$('speed').value;
+    if (simT > 24) simT = 0;
+    showIndex(Math.min(1440, Math.round(simT * 60)));
+  }
+  markerLight.intensity = 3.5 + Math.sin(performance.now() / 300) * 0.8;
+  controls.update();
+  updateHover();
+  composer.render();
+  labelRenderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
